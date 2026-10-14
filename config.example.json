@@ -1,0 +1,17 @@
+{
+  "company_name": "Company X",
+  "default_output_dir": ".",
+  "default_format": "md",
+  "task_conventions": {
+    "frontend_prefixes": ["FE", "FRONTEND", "UI"],
+    "backend_prefixes": ["BE", "BACKEND", "DB", "EP", "API"]
+  },
+  "git_conventions": {
+    "branch_prefix": "feature",
+    "commit_type": "feat"
+  },
+  "agents_guide": {
+    "include": true,
+    "template_path": "templates/AGENTS.md"
+  }
+}
