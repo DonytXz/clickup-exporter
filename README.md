@@ -128,6 +128,12 @@ cp config.example.json config.json
   "company_name": "Company X",
   "default_output_dir": "~/Downloads",
   "default_format": "md",
+  "development_profile": {
+    "role": "agnostic",
+    "framework": "generic",
+    "language": "generic",
+    "architecture_style": "clean-architecture"
+  },
   "task_conventions": {
     "frontend_prefixes": ["FE", "FRONTEND", "UI"],
     "backend_prefixes": ["BE", "BACKEND", "DB", "EP", "API"]
@@ -143,13 +149,36 @@ cp config.example.json config.json
 }
 ```
 
-- **`task_conventions`**: Defines prefixes used by your team to distinguish Frontend tasks (development scope) from Backend tasks (API reference/context).
+- **`development_profile`**: Defines the technical scope and stack profile:
+  - `role`: `"agnostic"` (default: adapts automatically to the target repository), `"frontend"`, `"backend"`, or `"fullstack"`.
+  - `framework`: Target framework (e.g., `"generic"`, `"angular"`, `"react"`, `"vue"`, `"nestjs"`, `"fastapi"`, etc.).
+  - `language`: Primary language (e.g., `"generic"`, `"typescript"`, `"python"`, `"go"`, etc.).
+  - `architecture_style`: `"clean-architecture"` (default), `"hexagonal"`, `"modular"`.
+- **`task_conventions`**: Defines prefixes used by your team to distinguish Frontend tasks from Backend tasks.
 - **`git_conventions`**: Sets the default branch prefix (e.g., `feature/PROJ-101-...`) and commit syntax generated in ticket headers.
 - **`agents_guide`**: Configures whether `AGENTS.md` is bundled and the path to your custom template.
+
+### Environment Variable Overrides (`.env`)
+You can also override profile settings dynamically using environment variables:
+```bash
+CLICKUP_DEV_ROLE=agnostic        # agnostic (default) | frontend | backend | fullstack
+CLICKUP_FRAMEWORK=generic        # generic, angular, react, nestjs, fastapi, etc.
+CLICKUP_LANGUAGE=generic         # generic, typescript, python, go, etc.
+CLICKUP_ARCH_STYLE=clean-architecture
+```
 
 You can also pass a custom configuration file at runtime:
 ```bash
 python3 clickup_export.py PROJ-101 --config path/to/custom-config.json
+```
+
+Or specify profile options directly on the CLI:
+```bash
+# Export with backend profile for a FastAPI / Python project
+python3 clickup_export.py PROJ-101 --role backend --framework fastapi --language python
+
+# Export with frontend profile
+python3 clickup_export.py PROJ-101 --role frontend --framework react --language typescript
 ```
 
 ---
@@ -165,6 +194,10 @@ python3 clickup_export.py PROJ-101 --config path/to/custom-config.json
 | **Markdown** | `--md`, `-md` | Export only Markdown placed directly at root. | **Yes (Default)** |
 | **Rich Text** | `--rtf`, `-rtf` | Export only Rich Text placed directly at root. | `false` |
 | **Both** | `--both`, `-both` | Export both formats in separate `md/` and `rtf/` subfolders. | `false` |
+| **Role** | `-r`, `--role` | Profile role: `agnostic` (default), `frontend`, `backend`, or `fullstack`. | `agnostic` |
+| **Framework** | `--framework` | Target framework (e.g. `generic`, `angular`, `react`, `nestjs`, `fastapi`). | `generic` |
+| **Language** | `--language` | Primary programming language (e.g. `generic`, `typescript`, `python`). | `generic` |
+| **Architecture** | `--arch-style` | Architecture style (e.g. `clean-architecture`, `hexagonal`, `modular`). | `clean-architecture` |
 | **Config** | `--config` | Path to custom JSON configuration file. | Looks for `config.json` |
 | **Agents Guide** | `--agents-file` | Path to custom `AGENTS.md` template file. | `templates/AGENTS.md` |
 | **No Agents** | `--no-agents` | Skip copying `AGENTS.md` to the output folder. | `false` |
