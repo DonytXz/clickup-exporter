@@ -1399,7 +1399,11 @@ def _stage_images_folder(source_root: Path, export_source: Path, raw_export_dir:
 
     if src_images.exists() and src_images.is_dir():
         dest_images = raw_export_dir / "images"
-        if dest_images.exists():
+        if src_images.resolve() == dest_images.resolve():
+            return
+        if dest_images.is_symlink():
+            dest_images.unlink()
+        elif dest_images.exists():
             shutil.rmtree(dest_images)
         shutil.copytree(src_images, dest_images)
         print(f"      - Staged images/ ({len(list(dest_images.glob('*')))} files)")
@@ -1429,25 +1433,32 @@ def _stage_agents_guide(
 
     dev_prof = cfg.get("development_profile", {})
     if agents_src:
-        shutil.copy2(agents_src, raw_export_dir / "AGENTS.md")
+        dest_raw = raw_export_dir / "AGENTS.md"
+        if agents_src.resolve() != dest_raw.resolve():
+            shutil.copy2(agents_src, dest_raw)
         if sdd_mode:
-            shutil.copy2(agents_src, export_folder / "AGENTS.md")
+            dest_spec = export_folder / "AGENTS.md"
+            if agents_src.resolve() != dest_spec.resolve():
+                shutil.copy2(agents_src, dest_spec)
         return True
 
     template_target = agents_file or agents_guide_cfg.get("template_path") or str(DEFAULT_AGENTS_MD)
     candidate_agents = Path(template_target)
     if candidate_agents.exists():
+        dest_raw = raw_export_dir / "AGENTS.md"
+        dest_spec = export_folder / "AGENTS.md" if sdd_mode else None
         try:
             raw_template = candidate_agents.read_text(encoding="utf-8")
             rendered = render_agents_template(raw_template, dev_prof)
-            (raw_export_dir / "AGENTS.md").write_text(rendered, encoding="utf-8")
-            if sdd_mode:
-                (export_folder / "AGENTS.md").write_text(rendered, encoding="utf-8")
+            dest_raw.write_text(rendered, encoding="utf-8")
+            if dest_spec and dest_spec.resolve() != dest_raw.resolve():
+                dest_spec.write_text(rendered, encoding="utf-8")
             return True
         except Exception:
-            shutil.copy2(candidate_agents, raw_export_dir / "AGENTS.md")
-            if sdd_mode:
-                shutil.copy2(candidate_agents, export_folder / "AGENTS.md")
+            if candidate_agents.resolve() != dest_raw.resolve():
+                shutil.copy2(candidate_agents, dest_raw)
+            if dest_spec and candidate_agents.resolve() != dest_spec.resolve():
+                shutil.copy2(candidate_agents, dest_spec)
             return True
     return False
 
@@ -1502,7 +1513,9 @@ def stage_from_export(
 
     print(f"\n[1/3] Staging raw export files from '{source_root.name}' into '{raw_export_dir.name}'...")
     for f in [main_file] + candidate_files:
-        shutil.copy2(f, raw_export_dir / f.name)
+        dest_file = raw_export_dir / f.name
+        if f.resolve() != dest_file.resolve():
+            shutil.copy2(f, dest_file)
         print(f"      - Staged {f.name}")
 
     _stage_images_folder(source_root, export_source, raw_export_dir)
