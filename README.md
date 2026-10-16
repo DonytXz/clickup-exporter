@@ -112,6 +112,23 @@ If you do not need the `AGENTS.md` file copied to the exported directory:
 ./clickup-export.sh PROJ-101 --no-agents
 ```
 
+### 6. Spec-Driven Development Mode (`--sdd`)
+Exports the story and subtasks into a `raw-export/` folder and generates a directive `TRANSFORM_TO_SDD.md` for AI coding agents (Cursor, Antigravity, Claude Code). SDD markdown files (`requirements.md`, `design.md`, `tasks.md`) are deliberately not part of the exporter output, allowing the agent to transform the exported ClickUp content into formal SDD artifacts:
+
+```bash
+# Default: Track specs within current project under specs/
+./clickup-export.sh PROJ-101 --sdd
+
+# Isolated: Decouple specs outside the git repository (e.g. in ../<project>-specs/specs/)
+./clickup-export.sh PROJ-101 --sdd --no-tracking
+
+# Centralized specs repository with Multi-Root VS Code/Cursor workspace:
+./clickup-export.sh PROJ-101 --sdd --specs-dir ~/Developer/project-specs --workspace
+
+# Stage an existing local export folder into SDD format:
+./clickup-export.sh --from-export "/path/to/exported-story" --sdd --no-tracking
+```
+
 ---
 
 ## ⚙️ Customization for Your Company / Team
@@ -145,6 +162,12 @@ cp config.example.json config.json
   "agents_guide": {
     "include": true,
     "template_path": "templates/AGENTS.md"
+  },
+  "sdd": {
+    "enabled": false,
+    "tracking": true,
+    "specs_dir": null,
+    "generate_workspace": false
   }
 }
 ```
@@ -157,6 +180,7 @@ cp config.example.json config.json
 - **`task_conventions`**: Defines prefixes used by your team to distinguish Frontend tasks from Backend tasks.
 - **`git_conventions`**: Sets the default branch prefix (e.g., `feature/PROJ-101-...`) and commit syntax generated in ticket headers.
 - **`agents_guide`**: Configures whether `AGENTS.md` is bundled and the path to your custom template.
+- **`sdd`**: Configures default Spec-Driven Development behavior.
 
 ### Environment Variable Overrides (`.env`)
 You can also override profile settings dynamically using environment variables:
@@ -187,7 +211,8 @@ python3 clickup_export.py PROJ-101 --role frontend --framework react --language 
 
 | Option | Flag | Description | Default |
 | :--- | :--- | :--- | :--- |
-| **Task** | *(positional)* | ClickUp Task URL or Task ID (standard or custom ID like `PROJ-101`). | *(Required)* |
+| **Task** | *(positional)* | ClickUp Task URL or Task ID (standard or custom ID like `PROJ-101`). | *(Required unless `--from-export`)* |
+| **From Export** | `--from-export` | Path to an existing exported folder to stage into SDD mode without API calls. | `null` |
 | **Output** | `-o`, `--output` | Destination parent directory. | `.` (Current dir) |
 | **Token** | `-t`, `--token` | ClickUp Personal API Token (`pk_...`). | Reads `~/.clickup_token` or env |
 | **Format** | `-f`, `--format` | Format mode: `md`, `rtf`, or `both`. | `md` |
@@ -201,6 +226,11 @@ python3 clickup_export.py PROJ-101 --role frontend --framework react --language 
 | **Config** | `--config` | Path to custom JSON configuration file. | Looks for `config.json` |
 | **Agents Guide** | `--agents-file` | Path to custom `AGENTS.md` template file. | `templates/AGENTS.md` |
 | **No Agents** | `--no-agents` | Skip copying `AGENTS.md` to the output folder. | `false` |
+| **SDD Mode** | `--sdd` | Enable Spec-Driven Development mode (raw-export/ + TRANSFORM_TO_SDD.md). | `false` |
+| **SDD Tracking** | `--tracking` | In SDD mode, keep specs inside `./specs/` (default). | `true` |
+| **SDD No-Tracking** | `--no-tracking` | In SDD mode, isolate specs outside code repository. | `false` |
+| **SDD Specs Dir** | `--specs-dir` | In SDD mode, custom base directory for specifications. | `null` |
+| **Workspace** | `--workspace` | In SDD mode, generate `.code-workspace` linking repo and specs. | `false` |
 | **Help** | `-h`, `--help` | Show command usage and options. | |
 
 ---
