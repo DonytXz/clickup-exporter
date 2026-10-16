@@ -46,6 +46,12 @@ DEFAULT_CONFIG = {
     "company_name": "Generic",
     "default_output_dir": ".",
     "default_format": "md",
+    "development_profile": {
+        "role": "agnostic",           # "agnostic", "frontend", "backend", "fullstack"
+        "framework": "generic",       # "generic", "angular", "react", "vue", "nestjs", "fastapi", etc.
+        "language": "generic",        # "generic", "typescript", "python", "go", etc.
+        "architecture_style": "clean-architecture"
+    },
     "task_conventions": {
         "frontend_prefixes": ["FE", "FRONTEND", "UI"],
         "backend_prefixes": ["BE", "BACKEND", "DB", "EP", "API"]
@@ -67,6 +73,63 @@ DEFAULT_CONFIG = {
 }
 
 
+def load_dotenv(dotenv_path: Path = None):
+    """Loads environment variables from .env if present and not already set in os.environ."""
+    if dotenv_path is None:
+        dotenv_path = Path(".env")
+    if not dotenv_path.exists() or not dotenv_path.is_file():
+        return
+    try:
+        with open(dotenv_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip("'\"")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        pass
+
+
+def render_agents_template(template_content: str, dev_prof: dict) -> str:
+    """Renders AGENTS.md template with dynamic profile values if placeholders exist."""
+    role = (dev_prof.get("role") or "agnostic").lower()
+    framework = dev_prof.get("framework") or "generic"
+    language = dev_prof.get("language") or "generic"
+    arch_style = dev_prof.get("architecture_style") or "clean-architecture"
+
+    if role == "agnostic":
+        summary_lines = [
+            "- **Modo:** Agnóstico / Adaptable al contexto del repositorio (`agnostic`)",
+            "- **Framework:** Detección automática según el repositorio (o genérico)",
+            "- **Lenguaje:** Detección automática según el repositorio (o genérico)",
+            f"- **Arquitectura base:** {arch_style}"
+        ]
+    else:
+        summary_lines = [
+            f"- **Rol activo:** {role.capitalize()} (`{role}`)",
+            f"- **Framework:** {framework}",
+            f"- **Lenguaje:** {language}",
+            f"- **Arquitectura base:** {arch_style}"
+        ]
+    profile_summary = "\n".join(summary_lines)
+
+    replacements = {
+        "{{DEV_PROFILE_SUMMARY}}": profile_summary,
+        "{{DEV_ROLE}}": role,
+        "{{FRAMEWORK}}": framework,
+        "{{LANGUAGE}}": language,
+        "{{ARCHITECTURE_STYLE}}": arch_style,
+    }
+    rendered = template_content
+    for k, v in replacements.items():
+        rendered = rendered.replace(k, v)
+    return rendered
+
+
 def load_config(config_path: str = None) -> dict:
     """
     Loads configuration from a JSON file if present, merged with defaults.
@@ -75,8 +138,10 @@ def load_config(config_path: str = None) -> dict:
       2. config.json in current directory
       3. clickup_config.json in current directory
       4. config.json in script directory
+    Environment variables (.env / os.environ) can also override profile settings.
     """
     import copy
+    load_dotenv()
     config = copy.deepcopy(DEFAULT_CONFIG)
     candidate_paths = []
     if config_path:
@@ -99,6 +164,16 @@ def load_config(config_path: str = None) -> dict:
                 break
             except Exception as e:
                 print(f"  [Warning] Could not parse config at {path}: {e}", file=sys.stderr)
+
+    dev_prof = config.setdefault("development_profile", {})
+    if "CLICKUP_DEV_ROLE" in os.environ:
+        dev_prof["role"] = os.environ["CLICKUP_DEV_ROLE"].strip().lower()
+    if "CLICKUP_FRAMEWORK" in os.environ:
+        dev_prof["framework"] = os.environ["CLICKUP_FRAMEWORK"].strip().lower()
+    if "CLICKUP_LANGUAGE" in os.environ:
+        dev_prof["language"] = os.environ["CLICKUP_LANGUAGE"].strip().lower()
+    if "CLICKUP_ARCH_STYLE" in os.environ:
+        dev_prof["architecture_style"] = os.environ["CLICKUP_ARCH_STYLE"].strip().lower()
 
     return config
 
@@ -495,43 +570,110 @@ def generate_task_header(task: dict, role: str = "story", parent_task: dict = No
     lines.append("> [!NOTE]")
     lines.append(f"> **ClickUp Ticket:** [`{display_id}`]({url}) | **Estado:** `{status_str.upper()}`")
 
+    dev_prof = cfg.get("development_profile", {})
+    dev_role = (dev_prof.get("role") or "agnostic").lower()
+
     if role == "story":
         slug = to_kebab_case(name)
         branch_name = f"{branch_prefix}/{display_id}-{slug}"
-        lines.append(f"> **Rol:** 🌟 **Historia / Ticket Principal**")
-        lines.append(f"> 📌 **Regla Git por defecto:** Es en este ticket donde se debe crear la **Rama** y el **Pull Request**.")
-        lines.append(f"> - **Rama recomendada:** `{branch_name}`")
-        lines.append(f"> - **Commit sugerido:** `{commit_type} : {display_id} - {name}`")
+        commit_example = f"{commit_type} : {display_id} - {name}"
+        lines.append(f"> **Ámbito:** 🌟 **Historia Principal (Main Story)**")
+        lines.append(f">")
+        lines.append(f"> 📌 **Recomendación por defecto (Ramas y PR):**")
+        lines.append(f"> Crear la rama Git y el Pull Request **directamente para esta Historia Principal (`{display_id}`)**.")
+
+        if dev_role == "frontend":
+            lines.append(f"> Todas las subtareas de Frontend (`FE - ...`) deben desarrollarse e integrarse dentro de esta misma rama.")
+        elif dev_role == "backend":
+            lines.append(f"> Todas las subtareas de Backend (`BE - ...`) deben desarrollarse e integrarse dentro de esta misma rama.")
+        elif dev_role == "fullstack":
+            lines.append(f"> Todas las subtareas (Frontend y Backend) deben desarrollarse e integrarse coordinadamente dentro de esta misma rama.")
+        else:  # agnostic (default)
+            lines.append(f"> Las subtareas asociadas deben desarrollarse e integrarse dentro de esta misma rama según el alcance técnico del repositorio activo.")
+
+        lines.append(f"> - **Rama sugerida:** `{branch_name}`")
+        lines.append(f"> - **Commit base:** `{commit_example}`")
+
         if subtasks:
-            lines.append(f">\n> **Subtareas vinculadas ({len(subtasks)}):**")
+            lines.append("\n### 📋 Subtareas Asociadas (Subtasks)\n")
+            lines.append("| Ticket ID | Subtarea | Ámbito | Rol / Propósito |")
+            lines.append("| :--- | :--- | :--- | :--- |")
             for sub in subtasks:
                 sub_cid = sub.get("custom_id") or sub.get("id")
+                sub_name = sub.get("name", f"Subtask-{sub.get('id')}")
                 sub_url = sub.get("url", f"https://app.clickup.com/t/{sub.get('id')}")
-                sub_name = sub.get("name", "Subtask")
-                lines.append(f"> - [`{sub_cid}`]({sub_url}) - {sub_name}")
+                sub_md_name = f"{sanitize_filename(sub_name)}.md"
+                sub_encoded = urllib.parse.quote(sub_md_name)
+
+                # Detect FE vs BE using configured prefixes
+                upper_name = sub_name.strip().upper()
+                is_fe_sub = any(upper_name.startswith(p) or f" {p}" in upper_name or f"[{p}]" in upper_name for p in fe_prefixes)
+                is_be_sub = any(upper_name.startswith(p) or f" {p}" in upper_name or f"[{p}]" in upper_name for p in be_prefixes)
+
+                if is_fe_sub:
+                    ambito = "Frontend"
+                    if dev_role == "frontend":
+                        prop = "🛠️ **Implementación / Desarrollo directo**"
+                    elif dev_role == "backend":
+                        prop = "ℹ️ Solo Contexto UI / Flujos de Usuario"
+                    elif dev_role == "fullstack":
+                        prop = "🛠️ **Implementación / Desarrollo (Capa Cliente)**"
+                    else:  # agnostic
+                        prop = "🛠️ Desarrollo FE (o contexto UI si se trabaja en BE)"
+                elif is_be_sub:
+                    ambito = "Backend"
+                    if dev_role == "backend":
+                        prop = "🛠️ **Implementación / Desarrollo directo (APIs, DB)**"
+                    elif dev_role == "frontend":
+                        prop = "ℹ️ Solo Contexto / Especificación API y Contratos"
+                    elif dev_role == "fullstack":
+                        prop = "🛠️ **Implementación / Desarrollo (Capa Servidor / DB)**"
+                    else:  # agnostic
+                        prop = "🛠️ Desarrollo BE (o contratos API si se trabaja en FE)"
+                else:
+                    ambito = "General"
+                    prop = "Tarea asociada"
+
+                lines.append(f"| [`{sub_cid}`]({sub_url}) | [{sub_name}]({sub_encoded}) | {ambito} | {prop} |")
 
     elif role == "subtask":
-        upper_name = name.upper()
-        is_fe = any(upper_name.startswith(p) or f"[{p}]" in upper_name or f"({p})" in upper_name for p in fe_prefixes)
-        is_be = any(upper_name.startswith(p) or f"[{p}]" in upper_name or f"({p})" in upper_name for p in be_prefixes)
+        upper_name = name.strip().upper()
+        is_fe = any(upper_name.startswith(p) or f" {p}" in upper_name or f"[{p}]" in upper_name for p in fe_prefixes)
+        is_be = any(upper_name.startswith(p) or f" {p}" in upper_name or f"[{p}]" in upper_name for p in be_prefixes)
 
-        parent_cid = parent_task.get("custom_id") or parent_task.get("id", "PARENT") if parent_task else "PARENT"
-        parent_url = parent_task.get("url", "#") if parent_task else "#"
+        parent_cid = parent_task.get("custom_id") or parent_task.get("id") if parent_task else "Parent"
         parent_name = parent_task.get("name", "Historia Principal") if parent_task else "Historia Principal"
+        parent_md = f"{sanitize_filename(parent_name)}.md"
+        parent_encoded = urllib.parse.quote(parent_md)
 
-        lines.append(f"> **Pertenece a la Historia Principal:** [`{parent_cid}`]({parent_url}) - {parent_name}")
+        lines.append(f"> **Historia Principal (Parent):** [`{parent_cid} - {parent_name}`]({parent_encoded})")
+
+        # Dynamically shorten custom ticket IDs (e.g., 'PROJ-101' -> 'T101', 'TASK-4900' -> 'T4900')
+        id_match = re.match(r'^[A-Za-z]+[-_]?(\d+)$', display_id)
+        short_sub_id = f"T{id_match.group(1)}" if id_match else display_id
 
         if is_fe:
-            short_sub_id = re.sub(r'^[A-Za-z0-9]+-', '', display_id)
-            lines.append(f"> **Ámbito:** 🎨 **Frontend (Alcance directo de implementación)**")
+            lines.append(f"> **Ámbito:** 🛠️ **Frontend (Capa de Cliente / UI)**")
+            lines.append(f">")
             lines.append(f"> 📌 **Recomendación por defecto (Ramas y PR):**")
             lines.append(f"> Por defecto, **NO crear una rama ni PR individual para esta subtarea**. Trabajar e integrar los cambios en la rama de la **Historia Principal** (`{branch_prefix}/{parent_cid}-...`).")
             lines.append(f"> - **Commit sugerido:** `{commit_type} : {parent_cid}_({short_sub_id}) - {name}` o `{commit_type} : {parent_cid} - {name}`")
             lines.append(f"> - **Vincular en PR:** En el PR de la Historia Principal, agregar este ticket (`{display_id}`) bajo `## Tickets relacionados`.")
+            if dev_role == "backend":
+                lines.append(f"> ℹ️ **Nota de Rol (Backend):** Utilizar como contexto de interfaz de usuario y contratos de datos requeridos por el cliente.")
+            elif dev_role == "agnostic":
+                lines.append(f"> ℹ️ **Alcance según repositorio:** Si el repositorio activo es de Frontend, implementar directamente. Si es de Backend, usar como referencia de requerimientos UI.")
         elif is_be:
-            lines.append(f"> **Ámbito:** ℹ️ **Backend (Solo Contexto y Especificación Técnica)**")
-            lines.append(f"> Utilizar este documento para consultar DTOs, endpoints, parámetros y queries de base de datos.")
-            lines.append(f"> **NO modificar código de backend** a menos que se indique explícitamente.")
+            lines.append(f"> **Ámbito:** ⚙️ **Backend (Capa de Servidor / APIs / DB)**")
+            lines.append(f">")
+            lines.append(f"> 📌 **Recomendación por defecto (Ramas y PR):**")
+            lines.append(f"> Por defecto, **NO crear una rama ni PR individual para esta subtarea**. Trabajar e integrar los cambios en la rama de la **Historia Principal** (`{branch_prefix}/{parent_cid}-...`).")
+            lines.append(f"> - **Commit sugerido:** `{commit_type} : {parent_cid}_({short_sub_id}) - {name}` o `{commit_type} : {parent_cid} - {name}`")
+            lines.append(f"> - **Vincular en PR:** En el PR de la Historia Principal, agregar este ticket (`{display_id}`) bajo `## Tickets relacionados`.")
+            if dev_role == "frontend":
+                lines.append(f"> ⚠️ **Atención:** Este ticket es únicamente para referencia de contratos, DTOs y endpoints de API/BD. **No modificar código de backend** salvo instrucción explícita o estar en un repositorio de backend.")
+            elif dev_role == "agnostic":
+                lines.append(f"> ℹ️ **Alcance según repositorio:** Si el repositorio activo es de Backend, implementar endpoints, modelos y servicios. Si es de Frontend, usar como referencia de contratos y endpoints.")
         else:
             lines.append(f"> **Ámbito:** 📋 Subtarea técnica general")
 
@@ -991,12 +1133,21 @@ def export_clickup_story(
         template_target = agents_file or agents_guide_cfg.get("template_path") or str(DEFAULT_AGENTS_MD)
         candidate_agents = Path(template_target)
         if candidate_agents.exists():
-            import shutil
             dest_agents = target_content_dir / "AGENTS.md"
-            shutil.copy2(candidate_agents, dest_agents)
-            has_agents_copied = True
-            loc_label = f"{sdd_prefix}AGENTS.md"
-            print(f"  -> Included AGENTS.md at {loc_label}")
+            dev_prof = cfg.get("development_profile", {})
+            try:
+                raw_template = candidate_agents.read_text(encoding="utf-8")
+                rendered_template = render_agents_template(raw_template, dev_prof)
+                dest_agents.write_text(rendered_template, encoding="utf-8")
+                has_agents_copied = True
+                loc_label = f"{sdd_prefix}AGENTS.md"
+                print(f"  -> Included AGENTS.md at {loc_label} (profile: {dev_prof.get('role', 'agnostic')})")
+            except Exception as e:
+                import shutil
+                shutil.copy2(candidate_agents, dest_agents)
+                has_agents_copied = True
+                loc_label = f"{sdd_prefix}AGENTS.md"
+                print(f"  -> Included AGENTS.md at {loc_label}")
 
     # SDD Post-processing: Generate TRANSFORM_TO_SDD.md & Optional Workspace
     if sdd_mode:
@@ -1060,6 +1211,7 @@ def resolve_token(cli_token: str) -> str:
       4. .env file in the current working directory
       5. Interactive user prompt (with option to persist to ~/.clickup_token)
     """
+    load_dotenv()
     if cli_token and cli_token.strip():
         return cli_token.strip()
 
@@ -1334,11 +1486,43 @@ def main():
         action="store_true",
         help="In SDD mode, generate a .code-workspace file linking source code and specs folder"
     )
+    parser.add_argument(
+        "--role", "-r",
+        choices=["agnostic", "frontend", "backend", "fullstack"],
+        default=None,
+        help="Development profile role: 'agnostic' (default), 'frontend', 'backend', or 'fullstack'"
+    )
+    parser.add_argument(
+        "--framework",
+        default=None,
+        help="Target framework (e.g. 'generic', 'angular', 'react', 'vue', 'nestjs', 'fastapi')"
+    )
+    parser.add_argument(
+        "--language",
+        default=None,
+        help="Primary programming language (e.g. 'generic', 'typescript', 'python', 'go')"
+    )
+    parser.add_argument(
+        "--arch-style",
+        default=None,
+        help="Architecture style (e.g. 'clean-architecture', 'hexagonal', 'modular')"
+    )
 
     args = parser.parse_args()
 
     # Load configuration
     cfg = load_config(args.config)
+
+    # CLI profile flags take top precedence over config and env
+    dev_prof = cfg.setdefault("development_profile", {})
+    if args.role:
+        dev_prof["role"] = args.role.strip().lower()
+    if args.framework:
+        dev_prof["framework"] = args.framework.strip().lower()
+    if args.language:
+        dev_prof["language"] = args.language.strip().lower()
+    if args.arch_style:
+        dev_prof["architecture_style"] = args.arch_style.strip().lower()
 
     # Determine format mode (CLI flags take precedence over config)
     if args.both_flag:

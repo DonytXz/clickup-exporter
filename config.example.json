@@ -2,6 +2,12 @@
   "company_name": "Company X",
   "default_output_dir": ".",
   "default_format": "md",
+  "development_profile": {
+    "role": "agnostic",
+    "framework": "generic",
+    "language": "generic",
+    "architecture_style": "clean-architecture"
+  },
   "task_conventions": {
     "frontend_prefixes": ["FE", "FRONTEND", "UI"],
     "backend_prefixes": ["BE", "BACKEND", "DB", "EP", "API"]

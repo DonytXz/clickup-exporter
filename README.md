@@ -107,6 +107,11 @@ Creates separated `md/` and `rtf/` directories inside the story folder:
 ```
 
 ### 5. Skip the Agent Guide (`--no-agents`)
+If you do not need the `AGENTS.md` file copied to the exported directory:
+```bash
+./clickup-export.sh PROJ-101 --no-agents
+```
+
 ### 6. Spec-Driven Development Mode (`--sdd`)
 Exports the story and subtasks into a `raw-export/` folder and generates a directive `TRANSFORM_TO_SDD.md` for AI coding agents (Cursor, Antigravity, Claude Code). SDD markdown files (`requirements.md`, `design.md`, `tasks.md`) are deliberately not part of the exporter output, allowing the agent to transform the exported ClickUp content into formal SDD artifacts:
 
@@ -126,6 +131,82 @@ Exports the story and subtasks into a `raw-export/` folder and generates a direc
 
 ---
 
+## ⚙️ Customization for Your Company / Team
+
+You can customize the exporter for any organization by creating a `config.json` (or `clickup_config.json`) in the project root:
+
+```bash
+cp config.example.json config.json
+```
+
+### Configuration Options (`config.json`):
+```json
+{
+  "company_name": "Company X",
+  "default_output_dir": "~/Downloads",
+  "default_format": "md",
+  "development_profile": {
+    "role": "agnostic",
+    "framework": "generic",
+    "language": "generic",
+    "architecture_style": "clean-architecture"
+  },
+  "task_conventions": {
+    "frontend_prefixes": ["FE", "FRONTEND", "UI"],
+    "backend_prefixes": ["BE", "BACKEND", "DB", "EP", "API"]
+  },
+  "git_conventions": {
+    "branch_prefix": "feature",
+    "commit_type": "feat"
+  },
+  "agents_guide": {
+    "include": true,
+    "template_path": "templates/AGENTS.md"
+  },
+  "sdd": {
+    "enabled": false,
+    "tracking": true,
+    "specs_dir": null,
+    "generate_workspace": false
+  }
+}
+```
+
+- **`development_profile`**: Defines the technical scope and stack profile:
+  - `role`: `"agnostic"` (default: adapts automatically to the target repository), `"frontend"`, `"backend"`, or `"fullstack"`.
+  - `framework`: Target framework (e.g., `"generic"`, `"angular"`, `"react"`, `"vue"`, `"nestjs"`, `"fastapi"`, etc.).
+  - `language`: Primary language (e.g., `"generic"`, `"typescript"`, `"python"`, `"go"`, etc.).
+  - `architecture_style`: `"clean-architecture"` (default), `"hexagonal"`, `"modular"`.
+- **`task_conventions`**: Defines prefixes used by your team to distinguish Frontend tasks from Backend tasks.
+- **`git_conventions`**: Sets the default branch prefix (e.g., `feature/PROJ-101-...`) and commit syntax generated in ticket headers.
+- **`agents_guide`**: Configures whether `AGENTS.md` is bundled and the path to your custom template.
+- **`sdd`**: Configures default Spec-Driven Development behavior.
+
+### Environment Variable Overrides (`.env`)
+You can also override profile settings dynamically using environment variables:
+```bash
+CLICKUP_DEV_ROLE=agnostic        # agnostic (default) | frontend | backend | fullstack
+CLICKUP_FRAMEWORK=generic        # generic, angular, react, nestjs, fastapi, etc.
+CLICKUP_LANGUAGE=generic         # generic, typescript, python, go, etc.
+CLICKUP_ARCH_STYLE=clean-architecture
+```
+
+You can also pass a custom configuration file at runtime:
+```bash
+python3 clickup_export.py PROJ-101 --config path/to/custom-config.json
+```
+
+Or specify profile options directly on the CLI:
+```bash
+# Export with backend profile for a FastAPI / Python project
+python3 clickup_export.py PROJ-101 --role backend --framework fastapi --language python
+
+# Export with frontend profile
+python3 clickup_export.py PROJ-101 --role frontend --framework react --language typescript
+```
+
+---
+
 ## 📋 CLI Options Reference
 
 | Option | Flag | Description | Default |
@@ -138,6 +219,10 @@ Exports the story and subtasks into a `raw-export/` folder and generates a direc
 | **Markdown** | `--md`, `-md` | Export only Markdown placed directly at root. | **Yes (Default)** |
 | **Rich Text** | `--rtf`, `-rtf` | Export only Rich Text placed directly at root. | `false` |
 | **Both** | `--both`, `-both` | Export both formats in separate `md/` and `rtf/` subfolders. | `false` |
+| **Role** | `-r`, `--role` | Profile role: `agnostic` (default), `frontend`, `backend`, or `fullstack`. | `agnostic` |
+| **Framework** | `--framework` | Target framework (e.g. `generic`, `angular`, `react`, `nestjs`, `fastapi`). | `generic` |
+| **Language** | `--language` | Primary programming language (e.g. `generic`, `typescript`, `python`). | `generic` |
+| **Architecture** | `--arch-style` | Architecture style (e.g. `clean-architecture`, `hexagonal`, `modular`). | `clean-architecture` |
 | **Config** | `--config` | Path to custom JSON configuration file. | Looks for `config.json` |
 | **Agents Guide** | `--agents-file` | Path to custom `AGENTS.md` template file. | `templates/AGENTS.md` |
 | **No Agents** | `--no-agents` | Skip copying `AGENTS.md` to the output folder. | `false` |
