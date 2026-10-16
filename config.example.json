@@ -13,5 +13,11 @@
   "agents_guide": {
     "include": true,
     "template_path": "templates/AGENTS.md"
+  },
+  "sdd": {
+    "enabled": false,
+    "tracking": true,
+    "specs_dir": null,
+    "generate_workspace": false
   }
 }
