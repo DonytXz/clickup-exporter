@@ -41,6 +41,7 @@ from pathlib import Path
 
 
 DEFAULT_AGENTS_MD = Path(__file__).resolve().parent / "templates" / "AGENTS.md"
+DEFAULT_SDD_DIRECTIVE_FILE = "TRANSFORM_TO_SDD.md"
 
 DEFAULT_CONFIG = {
     "company_name": "Generic",
@@ -297,7 +298,7 @@ class ClickUpClient:
                 team_ids_to_try.append(tid)
 
         last_error = None
-        is_custom_id_format = bool(re.search(r'^[A-Za-z0-9]+-[0-9]+$', task_id))
+        is_custom_id_format = bool(re.search(r'^[A-Za-z0-9]+-\d+$', task_id))
 
         # Strategy 1: Standard task ID lookup (if not explicitly custom-format)
         if not is_custom_id_format:
@@ -675,12 +676,12 @@ def generate_task_header(task: dict, role: str = "story", parent_task: dict = No
             elif dev_role == "agnostic":
                 lines.append(f"> ℹ️ **Alcance según repositorio:** Si el repositorio activo es de Backend, implementar endpoints, modelos y servicios. Si es de Frontend, usar como referencia de contratos y endpoints.")
         else:
-            lines.append(f"> **Ámbito:** 📋 Subtarea técnica general")
+            lines.append("> **Ámbito:** 📋 Subtarea técnica general")
 
     elif role == "prerequisite":
         parent_cid = parent_task.get("custom_id") or parent_task.get("id", "PARENT") if parent_task else "PARENT"
         lines.append(f"> **Tipo:** ⚠️ **Ticket Bloqueante / Prerrequisito** para [`{parent_cid}`]")
-        lines.append(f"> Debe ser considerado como contexto previo necesario antes de iniciar la historia.")
+        lines.append("> Debe ser considerado como contexto previo necesario antes de iniciar la historia.")
 
     lines.append("\n---\n")
     return "\n".join(lines)
@@ -724,7 +725,7 @@ def process_task_content(client: ClickUpClient, task: dict, images_dir: Path, im
             return match.group(0)
 
     # Markdown images: ![alt](url)
-    processed_md = re.sub(r'!\[(.*?)\]\((https?://[^\s\)]+)\)', image_sub, raw_md)
+    processed_md = re.sub(r'!\[([^\]]*)\]\((https?://[^\s)]+)\)', image_sub, raw_md)
 
     # HTML img tags: <img src="url" ...>
     def html_img_sub(match):
@@ -740,7 +741,7 @@ def process_task_content(client: ClickUpClient, task: dict, images_dir: Path, im
         except Exception:
             return match.group(0)
 
-    processed_md = re.sub(r'<img[^>]+src=["\'](https?://[^"\']+)["\'][^>]*>', html_img_sub, processed_md)
+    processed_md = re.sub(r'<img\b[^>]*\bsrc=["\'](https?://[^"\'\s>]+)["\'][^>]*>', html_img_sub, processed_md)
 
     # Unreferenced attachments (e.g. uploaded files not inline)
     unreferenced = []
@@ -790,15 +791,21 @@ def generate_transform_to_sdd_directive(
     be_files: list,
     prereq_files: list,
     has_agents: bool,
-    specs_folder: Path
+    specs_folder: Path,
+    dev_prof: dict = None
 ) -> str:
     """
     Generates the TRANSFORM_TO_SDD.md prompt for AI coding assistants.
     The directive guides the agent to read raw-export/ and generate:
     - requirements.md (EARS syntax)
-    - design.md (DDD Hexagonal architecture + backend contracts)
+    - design.md (DDD Hexagonal / Clean architecture + API contracts)
     - tasks.md (Atomic execution checklist)
     """
+    prof = dev_prof or {}
+    role = (prof.get("role") or "agnostic").lower()
+    framework = prof.get("framework") or "generic"
+    arch = prof.get("architecture_style") or "clean-architecture"
+
     fe_items = "\n".join(f"- `raw-export/{f}`" for f in fe_files) if fe_files else "- *(No Frontend subtasks detected)*"
     be_items = "\n".join(f"- `raw-export/{f}`" for f in be_files) if be_files else "- *(No Backend subtasks detected)*"
 
@@ -809,9 +816,13 @@ def generate_transform_to_sdd_directive(
 
     agents_line = "- **Reglas de Arquitectura y Gobernanza:** `raw-export/AGENTS.md`\n" if has_agents else ""
 
+    role_desc = "un Arquitecto de Software y Tech Lead experto en Clean Architecture y Domain-Driven Design (DDD)"
+    if role != "agnostic":
+        role_desc += f", especializado en {role.capitalize()} ({framework})"
+
     return f"""# Directiva de Transformación a Spec-Driven Development (SDD)
 
-Actúa como un Arquitecto de Software y Tech Lead experto en Domain-Driven Design (DDD) y Frontend (Angular).
+Actúa como {role_desc}.
 Tu objetivo es analizar los archivos exportados de ClickUp ubicados en `raw-export/` y transformarlos en los 3 artefactos formales de SDD:
 
 ## Archivos de Entrada Disponibles:
@@ -836,20 +847,19 @@ Tu objetivo es analizar los archivos exportados de ClickUp ubicados en `raw-expo
 - Identifica casos borde, validaciones de unicidad y flujos alternativos.
 
 ### 2. `design.md`
-- Diseña la solución Frontend siguiendo estrictamente la Arquitectura Hexagonal y DDD de `AGENTS.md`:
-  - **Dominio:** Entidades y Puertos (interfaces de repositorios).
-  - **Infraestructura:** Adaptador HTTP consumiendo los endpoints documentados en los archivos `BE - ...` (incluyendo DTOs y manejo de errores HTTP 400 y 409).
-  - **Aplicación:** Casos de uso (`Get...UseCase`, `Create...UseCase`, etc.).
-  - **Presentación:** Componentes Container/Presentational con Signals de Angular y Reactive Forms.
-- **Regla Estricta:** NO diseñar pruebas unitarias dentro de `/core`.
+- Diseña la solución siguiendo estrictamente los principios de {arch.capitalize()} y DDD de `AGENTS.md`:
+  - **Dominio:** Entidades, Value Objects y Puertos (interfaces de repositorios/servicios).
+  - **Infraestructura:** Adaptadores concretos consumiendo los contratos documentados en las subtareas técnicas (incluyendo DTOs y manejo de errores HTTP/BD).
+  - **Aplicación:** Casos de uso de negocio orquestando los puertos.
+  - **Presentación / Controladores:** Componentes o endpoints según el rol técnico del repositorio.
 
 ### 3. `tasks.md`
 - Desglosa la implementación en una lista de tareas atómicas y secuenciales con checkboxes `[ ]`:
   - Fase 1: Modelos de Dominio y Puertos.
-  - Fase 2: Adaptadores de Infraestructura y pruebas unitarias (`*.spec.ts`).
-  - Fase 3: Casos de Uso y pruebas unitarias.
-  - Fase 4: Componentes de UI (Formulario, Tabla y Pestaña principal).
-  - Fase 5: Suite de pruebas unitarias y prueba E2E simplificada.
+  - Fase 2: Adaptadores de Infraestructura y pruebas unitarias/integración.
+  - Fase 3: Casos de Uso y pruebas de aplicación.
+  - Fase 4: Capa de Presentación / Controladores / UI.
+  - Fase 5: Suite de pruebas unitarias y prueba funcional/E2E esencial.
 
 ---
 
@@ -877,6 +887,66 @@ def generate_code_workspace_file(project_dir: Path, specs_dir: Path, workspace_f
     }
     with open(workspace_file_path, "w", encoding="utf-8") as f:
         json.dump(workspace_data, f, indent=2, ensure_ascii=False)
+
+
+def resolve_specs_parent_dir(output_parent: Path, tracking: bool, specs_dir: str = None) -> Path:
+    """Resolves the specs parent directory based on tracking mode and specs_dir."""
+    if tracking:
+        return output_parent if output_parent.name == "specs" else output_parent / "specs"
+    if specs_dir:
+        sd = Path(os.path.expanduser(specs_dir))
+        return sd if sd.name == "specs" else sd / "specs"
+    proj_name = Path.cwd().name
+    return Path.cwd().parent / f"{proj_name}-specs" / "specs"
+
+
+def finalize_sdd_artifacts(
+    export_folder: Path,
+    main_story_name: str,
+    fe_files: list,
+    be_files: list,
+    prereq_files: list,
+    has_agents: bool,
+    workspace: bool = False,
+    dev_prof: dict = None
+) -> Path:
+    """Generates TRANSFORM_TO_SDD.md and optional multi-root workspace file."""
+    transform_prompt = generate_transform_to_sdd_directive(
+        story_filename=main_story_name,
+        fe_files=fe_files,
+        be_files=be_files,
+        prereq_files=prereq_files,
+        has_agents=has_agents,
+        specs_folder=export_folder,
+        dev_prof=dev_prof
+    )
+    directive_file = export_folder / DEFAULT_SDD_DIRECTIVE_FILE
+    directive_file.write_text(transform_prompt, encoding="utf-8")
+    print(f"  -> Generated SDD AI Directive: {directive_file.name}")
+
+    if workspace:
+        proj_root = Path.cwd()
+        ws_path = proj_root / f"{proj_root.name}.code-workspace"
+        generate_code_workspace_file(proj_root, export_folder, ws_path)
+        print(f"  -> Generated Multi-Root Workspace: {ws_path.name}")
+        return ws_path
+    return None
+
+
+def print_sdd_summary(export_folder: Path, raw_export_dir: Path, workspace_file_path: Path):
+    """Prints standard summary and instructions for SDD workflow."""
+    print(f"📁 SDD Specs Folder:    {export_folder.resolve()}")
+    print(f"   📦 Raw Export:        {raw_export_dir.resolve()}")
+    print(f"   📋 SDD AI Directive:  {export_folder / DEFAULT_SDD_DIRECTIVE_FILE}")
+    if (export_folder / "AGENTS.md").exists():
+        print(f"   🤖 Architecture Guide: {export_folder / 'AGENTS.md'}")
+    if workspace_file_path:
+        print(f"   💻 IDE Workspace:     {workspace_file_path.resolve()}")
+    print("\n💡 SDD Workflow Note:")
+    print("   The raw ClickUp content has been staged into 'raw-export/'.")
+    print("   SDD markdown files (requirements.md, design.md, tasks.md) are not included")
+    print("   allowing your AI agent to transform the exported files into formal SDD.")
+    print(f"   👉 Provide {DEFAULT_SDD_DIRECTIVE_FILE} to your AI agent (Cursor / Antigravity / Claude Code) to begin.")
 
 
 def export_clickup_story(
@@ -926,18 +996,7 @@ def export_clickup_story(
 
     workspace_file_path = None
     if sdd_mode:
-        if tracking:
-            # Mode 1: Tracking inside project specs/
-            specs_parent = output_parent if output_parent.name == "specs" else output_parent / "specs"
-        else:
-            # Mode 2: Isolated specs
-            if specs_dir:
-                sd = Path(os.path.expanduser(specs_dir))
-                specs_parent = sd if sd.name == "specs" else sd / "specs"
-            else:
-                proj_name = Path.cwd().name
-                specs_parent = Path.cwd().parent / f"{proj_name}-specs" / "specs"
-
+        specs_parent = resolve_specs_parent_dir(output_parent, tracking, specs_dir)
         export_folder = specs_parent / folder_name
         export_folder.mkdir(parents=True, exist_ok=True)
         raw_export_dir = export_folder / "raw-export"
@@ -976,11 +1035,11 @@ def export_clickup_story(
     if sdd_mode:
         print(f"      - SDD Mode Active: Raw export files placed in {raw_export_dir.name}/")
     if mode == "md":
-        print(f"      - Mode: Markdown default (files placed directly at content root)")
+        print("      - Mode: Markdown default (files placed directly at content root)")
     elif mode == "rtf":
-        print(f"      - Mode: RTF only (files placed directly at content root)")
+        print("      - Mode: RTF only (files placed directly at content root)")
     elif mode == "both":
-        print(f"      - Mode: Both (Markdown in md/, Rich Text in rtf/)")
+        print("      - Mode: Both (Markdown in md/, Rich Text in rtf/)")
 
     image_counter = [0]
     subtasks = main_task.get("subtasks", [])
@@ -1150,42 +1209,23 @@ def export_clickup_story(
                 print(f"  -> Included AGENTS.md at {loc_label}")
 
     # SDD Post-processing: Generate TRANSFORM_TO_SDD.md & Optional Workspace
+    workspace_file_path = None
     if sdd_mode:
-        transform_prompt = generate_transform_to_sdd_directive(
-            story_filename=main_story_file_name or f"{sanitize_filename(story_title)}.md",
+        workspace_file_path = finalize_sdd_artifacts(
+            export_folder=export_folder,
+            main_story_name=main_story_file_name or f"{sanitize_filename(story_title)}.md",
             fe_files=fe_files,
             be_files=be_files,
             prereq_files=prereq_files,
             has_agents=has_agents_copied,
-            specs_folder=export_folder
+            workspace=workspace,
+            dev_prof=cfg.get("development_profile", {})
         )
-        directive_file = export_folder / "TRANSFORM_TO_SDD.md"
-        with open(directive_file, "w", encoding="utf-8") as f:
-            f.write(transform_prompt)
-        print(f"  -> Generated SDD AI Directive: {directive_file.name}")
-
-        if workspace:
-            proj_root = Path.cwd()
-            ws_path = proj_root / f"{proj_root.name}.code-workspace"
-            generate_code_workspace_file(proj_root, export_folder, ws_path)
-            workspace_file_path = ws_path
-            print(f"  -> Generated Multi-Root Workspace: {ws_path.name}")
 
     print("\n" + "=" * 60)
     print("✅ Export completed successfully!")
     if sdd_mode:
-        print(f"📁 SDD Specs Folder:    {export_folder.resolve()}")
-        print(f"   📦 Raw Export:        {raw_export_dir.resolve()}")
-        print(f"   📋 SDD AI Directive:  {export_folder / 'TRANSFORM_TO_SDD.md'}")
-        if (target_content_dir / "AGENTS.md").exists():
-            print(f"   🤖 Architecture Guide: {target_content_dir / 'AGENTS.md'}")
-        if workspace_file_path:
-            print(f"   💻 IDE Workspace:     {workspace_file_path.resolve()}")
-        print("\n💡 SDD Workflow Note:")
-        print("   The raw ClickUp content has been exported to 'raw-export/'.")
-        print("   SDD markdown files (requirements.md, design.md, tasks.md) are not included")
-        print("   allowing your AI agent to transform the exported files into formal SDD.")
-        print("   👉 Provide TRANSFORM_TO_SDD.md to your AI agent (Cursor / Antigravity / Claude Code) to begin.")
+        print_sdd_summary(export_folder, raw_export_dir, workspace_file_path)
     else:
         print(f"📁 Destination Folder: {export_folder.resolve()}")
         if (export_folder / "AGENTS.md").exists():
@@ -1290,9 +1330,9 @@ def stage_from_export(
     for f in md_files:
         fname = f.name
         upper = fname.upper()
-        if fname in ("AGENTS.md", "README.md", "TRANSFORM_TO_SDD.md"):
+        if fname in ("AGENTS.md", "README.md", DEFAULT_SDD_DIRECTIVE_FILE):
             continue
-        if upper.startswith("PREVIUS TICKET NEEDED") or upper.startswith("PREVIOUS TICKET NEEDED"):
+        if upper.startswith(("PREVIUS TICKET NEEDED", "PREVIOUS TICKET NEEDED")):
             prereq_files.append(fname)
         elif any(upper.startswith(p) or f"[{p}]" in upper or f"({p})" in upper for p in fe_prefixes):
             fe_files.append(fname)
@@ -1306,16 +1346,7 @@ def stage_from_export(
     folder_name = sanitize_filename(story_title)
 
     if sdd_mode:
-        if tracking:
-            specs_parent = output_parent if output_parent.name == "specs" else output_parent / "specs"
-        else:
-            if specs_dir:
-                sd = Path(os.path.expanduser(specs_dir))
-                specs_parent = sd if sd.name == "specs" else sd / "specs"
-            else:
-                proj_name = Path.cwd().name
-                specs_parent = Path.cwd().parent / f"{proj_name}-specs" / "specs"
-
+        specs_parent = resolve_specs_parent_dir(output_parent, tracking, specs_dir)
         export_folder = specs_parent / folder_name
         export_folder.mkdir(parents=True, exist_ok=True)
         raw_export_dir = export_folder / "raw-export"
@@ -1351,43 +1382,23 @@ def stage_from_export(
 
     workspace_file_path = None
     if sdd_mode:
-        print(f"\n[2/3] Generating SDD AI Directive (TRANSFORM_TO_SDD.md)...")
-        transform_prompt = generate_transform_to_sdd_directive(
-            story_filename=main_file.name,
+        print("\n[2/3] Generating SDD AI Directive (TRANSFORM_TO_SDD.md)...")
+        workspace_file_path = finalize_sdd_artifacts(
+            export_folder=export_folder,
+            main_story_name=main_file.name,
             fe_files=fe_files,
             be_files=be_files,
             prereq_files=prereq_files,
             has_agents=has_agents_copied,
-            specs_folder=export_folder
+            workspace=workspace,
+            dev_prof=cfg.get("development_profile", {})
         )
-        directive_file = export_folder / "TRANSFORM_TO_SDD.md"
-        with open(directive_file, "w", encoding="utf-8") as f:
-            f.write(transform_prompt)
-        print(f"  -> Generated SDD AI Directive: {directive_file.name}")
-
-        if workspace:
-            proj_root = Path.cwd()
-            ws_path = proj_root / f"{proj_root.name}.code-workspace"
-            generate_code_workspace_file(proj_root, export_folder, ws_path)
-            workspace_file_path = ws_path
-            print(f"  -> Generated Multi-Root Workspace: {ws_path.name}")
 
     print("\n[3/3] Verification and Staging Complete!")
     print("\n" + "=" * 60)
     print("✅ Staging completed successfully!")
     if sdd_mode:
-        print(f"📁 SDD Specs Folder:    {export_folder.resolve()}")
-        print(f"   📦 Raw Export:        {raw_export_dir.resolve()}")
-        print(f"   📋 SDD AI Directive:  {export_folder / 'TRANSFORM_TO_SDD.md'}")
-        if (export_folder / "AGENTS.md").exists():
-            print(f"   🤖 Architecture Guide: {export_folder / 'AGENTS.md'}")
-        if workspace_file_path:
-            print(f"   💻 IDE Workspace:     {workspace_file_path.resolve()}")
-        print("\n💡 SDD Workflow Note:")
-        print("   The raw ClickUp content has been staged into 'raw-export/'.")
-        print("   SDD markdown files (requirements.md, design.md, tasks.md) are not included")
-        print("   allowing your AI agent to transform the exported files into formal SDD.")
-        print("   👉 Provide TRANSFORM_TO_SDD.md to your AI agent (Cursor / Antigravity / Claude Code) to begin.")
+        print_sdd_summary(export_folder, raw_export_dir, workspace_file_path)
     else:
         print(f"📁 Destination Folder: {export_folder.resolve()}")
     print("=" * 60)
