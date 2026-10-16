@@ -792,7 +792,8 @@ def generate_transform_to_sdd_directive(
     prereq_files: list,
     has_agents: bool,
     specs_folder: Path,
-    dev_prof: dict = None
+    dev_prof: dict = None,
+    sdd_subpath: str = "raw-export/"
 ) -> str:
     """
     Generates the TRANSFORM_TO_SDD.md prompt for AI coding assistants.
@@ -806,15 +807,16 @@ def generate_transform_to_sdd_directive(
     framework = prof.get("framework") or "generic"
     arch = prof.get("architecture_style") or "clean-architecture"
 
-    fe_items = "\n".join(f"- `raw-export/{f}`" for f in fe_files) if fe_files else "- *(No Frontend subtasks detected)*"
-    be_items = "\n".join(f"- `raw-export/{f}`" for f in be_files) if be_files else "- *(No Backend subtasks detected)*"
+    sub_p = sdd_subpath if sdd_subpath.endswith("/") else f"{sdd_subpath}/"
+    fe_items = "\n".join(f"- `{sub_p}{f}`" for f in fe_files) if fe_files else "- *(No Frontend subtasks detected)*"
+    be_items = "\n".join(f"- `{sub_p}{f}`" for f in be_files) if be_files else "- *(No Backend subtasks detected)*"
 
     prereq_section = ""
     if prereq_files:
-        prereq_items = "\n".join(f"- `raw-export/{f}`" for f in prereq_files)
+        prereq_items = "\n".join(f"- `{sub_p}{f}`" for f in prereq_files)
         prereq_section = f"\n### Prerrequisitos y Dependencias Bloqueantes:\n{prereq_items}\n"
 
-    agents_line = "- **Reglas de Arquitectura y Gobernanza:** `raw-export/AGENTS.md`\n" if has_agents else ""
+    agents_line = f"- **Reglas de Arquitectura y Gobernanza:** `{sub_p}AGENTS.md`\n" if has_agents else ""
 
     role_desc = "un Arquitecto de Software y Tech Lead experto en Clean Architecture y Domain-Driven Design (DDD)"
     if role != "agnostic":
@@ -823,10 +825,10 @@ def generate_transform_to_sdd_directive(
     return f"""# Directiva de Transformación a Spec-Driven Development (SDD)
 
 Actúa como {role_desc}.
-Tu objetivo es analizar los archivos exportados de ClickUp ubicados en `raw-export/` y transformarlos en los 3 artefactos formales de SDD:
+Tu objetivo es analizar los archivos exportados de ClickUp ubicados en `{sub_p}` y transformarlos en los 3 artefactos formales de SDD:
 
 ## Archivos de Entrada Disponibles:
-- **Historia Principal:** `raw-export/{story_filename}`
+- **Historia Principal:** `{sub_p}{story_filename}`
 
 ### Subtareas Frontend (Alcance de Implementación UI):
 {fe_items}
@@ -864,7 +866,7 @@ Tu objetivo es analizar los archivos exportados de ClickUp ubicados en `raw-expo
 ---
 
 > [!IMPORTANT]
-> Procede a generar `requirements.md`, `design.md` y `tasks.md` directamente en la raíz de esta carpeta de especificaciones (`{specs_folder.resolve()}`), dejando `raw-export/` intacto como fuente de verdad.
+> Procede a generar `requirements.md`, `design.md` y `tasks.md` directamente en la raíz de esta carpeta de especificaciones (`{specs_folder.resolve()}`), dejando `{sub_p}` intacto como fuente de verdad.
 """
 
 
@@ -891,11 +893,11 @@ def generate_code_workspace_file(project_dir: Path, specs_dir: Path, workspace_f
 
 def resolve_specs_parent_dir(output_parent: Path, tracking: bool, specs_dir: str = None) -> Path:
     """Resolves the specs parent directory based on tracking mode and specs_dir."""
-    if tracking:
-        return output_parent if output_parent.name == "specs" else output_parent / "specs"
     if specs_dir:
         sd = Path(os.path.expanduser(specs_dir))
         return sd if sd.name == "specs" else sd / "specs"
+    if tracking:
+        return output_parent if output_parent.name == "specs" else output_parent / "specs"
     proj_name = Path.cwd().name
     return Path.cwd().parent / f"{proj_name}-specs" / "specs"
 
@@ -908,7 +910,8 @@ def finalize_sdd_artifacts(
     prereq_files: list,
     has_agents: bool,
     workspace: bool = False,
-    dev_prof: dict = None
+    dev_prof: dict = None,
+    sdd_subpath: str = "raw-export/"
 ) -> Path:
     """Generates TRANSFORM_TO_SDD.md and optional multi-root workspace file."""
     transform_prompt = generate_transform_to_sdd_directive(
@@ -918,7 +921,8 @@ def finalize_sdd_artifacts(
         prereq_files=prereq_files,
         has_agents=has_agents,
         specs_folder=export_folder,
-        dev_prof=dev_prof
+        dev_prof=dev_prof,
+        sdd_subpath=sdd_subpath
     )
     directive_file = export_folder / DEFAULT_SDD_DIRECTIVE_FILE
     directive_file.write_text(transform_prompt, encoding="utf-8")
@@ -974,6 +978,10 @@ def export_clickup_story(
         mode = "both"
     else:
         mode = "md"
+
+    if sdd_mode and mode == "rtf":
+        print("  [Notice] SDD mode requires Markdown files for AI directives. Switching format to 'both' (Markdown + RTF).", file=sys.stderr)
+        mode = "both"
 
     # [1/5] Resolving task ID
     print("\n" + "=" * 60)
@@ -1198,12 +1206,20 @@ def export_clickup_story(
                 raw_template = candidate_agents.read_text(encoding="utf-8")
                 rendered_template = render_agents_template(raw_template, dev_prof)
                 dest_agents.write_text(rendered_template, encoding="utf-8")
+                if sdd_mode:
+                    (export_folder / "AGENTS.md").write_text(rendered_template, encoding="utf-8")
+                    if mode == "both":
+                        (md_dir / "AGENTS.md").write_text(rendered_template, encoding="utf-8")
                 has_agents_copied = True
                 loc_label = f"{sdd_prefix}AGENTS.md"
                 print(f"  -> Included AGENTS.md at {loc_label} (profile: {dev_prof.get('role', 'agnostic')})")
-            except Exception as e:
+            except Exception:
                 import shutil
                 shutil.copy2(candidate_agents, dest_agents)
+                if sdd_mode:
+                    shutil.copy2(candidate_agents, export_folder / "AGENTS.md")
+                    if mode == "both":
+                        shutil.copy2(candidate_agents, md_dir / "AGENTS.md")
                 has_agents_copied = True
                 loc_label = f"{sdd_prefix}AGENTS.md"
                 print(f"  -> Included AGENTS.md at {loc_label}")
@@ -1211,6 +1227,7 @@ def export_clickup_story(
     # SDD Post-processing: Generate TRANSFORM_TO_SDD.md & Optional Workspace
     workspace_file_path = None
     if sdd_mode:
+        sdd_subpath = "raw-export/md/" if mode == "both" else "raw-export/"
         workspace_file_path = finalize_sdd_artifacts(
             export_folder=export_folder,
             main_story_name=main_story_file_name or f"{sanitize_filename(story_title)}.md",
@@ -1219,7 +1236,8 @@ def export_clickup_story(
             prereq_files=prereq_files,
             has_agents=has_agents_copied,
             workspace=workspace,
-            dev_prof=cfg.get("development_profile", {})
+            dev_prof=cfg.get("development_profile", {}),
+            sdd_subpath=sdd_subpath
         )
 
     print("\n" + "=" * 60)
@@ -1296,6 +1314,144 @@ def resolve_token(cli_token: str) -> str:
     return token
 
 
+def _find_markdown_source_root(export_source: Path) -> Path:
+    """Finds the single Markdown source root, prioritizing raw-export/md, then md, then export_source."""
+    candidates = [
+        export_source / "raw-export" / "md",
+        export_source / "raw-export",
+        export_source / "md",
+        export_source
+    ]
+    return next((p for p in candidates if p.is_dir() and any(p.glob("*.md"))), export_source)
+
+
+def _classify_story_files(
+    source_root: Path,
+    md_files: list,
+    be_prefixes: list,
+    fe_prefixes: list
+) -> tuple:
+    """
+    Identifies main story file by header marker and classifies remaining files into
+    backend, frontend, or prerequisite subtasks.
+    """
+    main_file = None
+    candidate_files = []
+    ignored_names = {
+        "AGENTS.md", "README.md", DEFAULT_SDD_DIRECTIVE_FILE,
+        "requirements.md", "design.md", "tasks.md"
+    }
+
+    for f in md_files:
+        if f.name in ignored_names:
+            continue
+        try:
+            content = f.read_text(encoding="utf-8", errors="ignore")
+            if "Historia Principal (Main Story)" in content:
+                main_file = f
+                continue
+        except Exception:
+            pass
+        candidate_files.append(f)
+
+    if main_file is None:
+        unprefixed = [
+            f for f in candidate_files
+            if not f.name.upper().startswith(("PREVIUS TICKET NEEDED", "PREVIOUS TICKET NEEDED"))
+            and not any(f.name.upper().startswith(p) or f"[{p}]" in f.name.upper() or f"({p})" in f.name.upper() for p in be_prefixes + fe_prefixes)
+        ]
+        if unprefixed:
+            main_file = unprefixed[0]
+            candidate_files.remove(main_file)
+        elif candidate_files:
+            main_file = candidate_files.pop(0)
+        else:
+            raise ValueError(f"No valid markdown story files found in {source_root}")
+
+    fe_files = []
+    be_files = []
+    prereq_files = []
+
+    for f in candidate_files:
+        fname = f.name
+        upper = fname.upper()
+        if upper.startswith(("PREVIUS TICKET NEEDED", "PREVIOUS TICKET NEEDED")):
+            prereq_files.append(fname)
+        elif any(upper.startswith(p) or f"[{p}]" in upper or f"({p})" in upper for p in be_prefixes):
+            be_files.append(fname)
+        elif any(upper.startswith(p) or f"[{p}]" in upper or f"({p})" in upper for p in fe_prefixes):
+            fe_files.append(fname)
+        else:
+            fe_files.append(fname)
+
+    return main_file, candidate_files, fe_files, be_files, prereq_files
+
+
+def _stage_images_folder(source_root: Path, export_source: Path, raw_export_dir: Path):
+    """Copies images folder from source to destination if present."""
+    import shutil
+    src_images = source_root / "images"
+    if not (src_images.exists() and src_images.is_dir()):
+        for img_cand in [export_source / "raw-export" / "images", export_source / "images"]:
+            if img_cand.exists() and img_cand.is_dir():
+                src_images = img_cand
+                break
+
+    if src_images.exists() and src_images.is_dir():
+        dest_images = raw_export_dir / "images"
+        if dest_images.exists():
+            shutil.rmtree(dest_images)
+        shutil.copytree(src_images, dest_images)
+        print(f"      - Staged images/ ({len(list(dest_images.glob('*')))} files)")
+
+
+def _stage_agents_guide(
+    source_root: Path,
+    export_source: Path,
+    raw_export_dir: Path,
+    export_folder: Path,
+    sdd_mode: bool,
+    agents_file: str,
+    no_agents: bool,
+    cfg: dict
+) -> bool:
+    """Stages AGENTS.md guide honoring configuration, rendering templates when missing."""
+    import shutil
+    agents_guide_cfg = cfg.get("agents_guide", {})
+    if no_agents or not agents_guide_cfg.get("include", True):
+        return False
+
+    agents_src = None
+    for p in [source_root / "AGENTS.md", export_source / "raw-export" / "AGENTS.md", export_source / "AGENTS.md"]:
+        if p.exists() and p.is_file():
+            agents_src = p
+            break
+
+    dev_prof = cfg.get("development_profile", {})
+    if agents_src:
+        shutil.copy2(agents_src, raw_export_dir / "AGENTS.md")
+        if sdd_mode:
+            shutil.copy2(agents_src, export_folder / "AGENTS.md")
+        return True
+
+    template_target = agents_file or agents_guide_cfg.get("template_path") or str(DEFAULT_AGENTS_MD)
+    candidate_agents = Path(template_target)
+    if candidate_agents.exists():
+        try:
+            raw_template = candidate_agents.read_text(encoding="utf-8")
+            rendered = render_agents_template(raw_template, dev_prof)
+            (raw_export_dir / "AGENTS.md").write_text(rendered, encoding="utf-8")
+            if sdd_mode:
+                (export_folder / "AGENTS.md").write_text(rendered, encoding="utf-8")
+            return True
+        except Exception:
+            shutil.copy2(candidate_agents, raw_export_dir / "AGENTS.md")
+            if sdd_mode:
+                shutil.copy2(candidate_agents, export_folder / "AGENTS.md")
+            return True
+    return False
+
+
 def stage_from_export(
     export_source: Path,
     output_parent: Path,
@@ -1303,18 +1459,22 @@ def stage_from_export(
     tracking: bool = True,
     specs_dir: str = None,
     workspace: bool = False,
+    agents_file: str = None,
+    no_agents: bool = False,
     config: dict = None
 ) -> Path:
     """
     Stages an existing exported folder into an SDD-ready folder with raw-export/
     and TRANSFORM_TO_SDD.md without making any ClickUp API calls.
     """
+    import shutil
     cfg = config or DEFAULT_CONFIG
     export_source = Path(export_source).resolve()
     if not export_source.exists() or not export_source.is_dir():
         raise FileNotFoundError(f"Export source directory not found: {export_source}")
 
-    md_files = list(export_source.glob("*.md"))
+    source_root = _find_markdown_source_root(export_source)
+    md_files = list(source_root.glob("*.md"))
     if not md_files:
         raise ValueError(f"No markdown (.md) files found in {export_source}")
 
@@ -1322,26 +1482,10 @@ def stage_from_export(
     fe_prefixes = [p.upper() for p in task_cfg.get("frontend_prefixes", ["FE", "FRONTEND", "UI"])]
     be_prefixes = [p.upper() for p in task_cfg.get("backend_prefixes", ["BE", "BACKEND", "DB", "EP", "API"])]
 
-    main_candidates = []
-    fe_files = []
-    be_files = []
-    prereq_files = []
+    main_file, candidate_files, fe_files, be_files, prereq_files = _classify_story_files(
+        source_root, md_files, be_prefixes, fe_prefixes
+    )
 
-    for f in md_files:
-        fname = f.name
-        upper = fname.upper()
-        if fname in ("AGENTS.md", "README.md", DEFAULT_SDD_DIRECTIVE_FILE):
-            continue
-        if upper.startswith(("PREVIUS TICKET NEEDED", "PREVIOUS TICKET NEEDED")):
-            prereq_files.append(fname)
-        elif any(upper.startswith(p) or f"[{p}]" in upper or f"({p})" in upper for p in fe_prefixes):
-            fe_files.append(fname)
-        elif any(upper.startswith(p) or f"[{p}]" in upper or f"({p})" in upper for p in be_prefixes):
-            be_files.append(fname)
-        else:
-            main_candidates.append(f)
-
-    main_file = main_candidates[0] if main_candidates else md_files[0]
     story_title = main_file.stem
     folder_name = sanitize_filename(story_title)
 
@@ -1356,29 +1500,17 @@ def stage_from_export(
         export_folder.mkdir(parents=True, exist_ok=True)
         raw_export_dir = export_folder
 
-    import shutil
-    print(f"\n[1/3] Staging raw export files from '{export_source.name}' into '{raw_export_dir.name}'...")
-    for f in md_files:
+    print(f"\n[1/3] Staging raw export files from '{source_root.name}' into '{raw_export_dir.name}'...")
+    for f in [main_file] + candidate_files:
         shutil.copy2(f, raw_export_dir / f.name)
         print(f"      - Staged {f.name}")
 
-    src_images = export_source / "images"
-    if src_images.exists() and src_images.is_dir():
-        dest_images = raw_export_dir / "images"
-        if dest_images.exists():
-            shutil.rmtree(dest_images)
-        shutil.copytree(src_images, dest_images)
-        print(f"      - Staged images/ ({len(list(dest_images.glob('*')))} files)")
+    _stage_images_folder(source_root, export_source, raw_export_dir)
 
-    has_agents_copied = False
-    agents_src = export_source / "AGENTS.md"
-    if not agents_src.exists():
-        agents_src = DEFAULT_AGENTS_MD
-    if agents_src.exists():
-        shutil.copy2(agents_src, raw_export_dir / "AGENTS.md")
-        if sdd_mode:
-            shutil.copy2(agents_src, export_folder / "AGENTS.md")
-        has_agents_copied = True
+    has_agents_copied = _stage_agents_guide(
+        source_root, export_source, raw_export_dir, export_folder,
+        sdd_mode, agents_file, no_agents, cfg
+    )
 
     workspace_file_path = None
     if sdd_mode:
@@ -1391,7 +1523,8 @@ def stage_from_export(
             prereq_files=prereq_files,
             has_agents=has_agents_copied,
             workspace=workspace,
-            dev_prof=cfg.get("development_profile", {})
+            dev_prof=cfg.get("development_profile", {}),
+            sdd_subpath="raw-export/"
         )
 
     print("\n[3/3] Verification and Staging Complete!")
@@ -1555,6 +1688,10 @@ def main():
     sdd_cfg = cfg.get("sdd", {})
     sdd_mode = args.sdd or sdd_cfg.get("enabled", False)
 
+    if sdd_mode and chosen_format in ("rtf", "rtfd"):
+        print("  [Notice] SDD mode requires Markdown files for AI directives. Switching format to 'both' (Markdown + RTF).", file=sys.stderr)
+        chosen_format = "both"
+
     if args.no_tracking:
         tracking = False
     elif args.tracking is not None:
@@ -1575,6 +1712,8 @@ def main():
                 tracking=tracking,
                 specs_dir=specs_dir,
                 workspace=workspace,
+                agents_file=args.agents_file,
+                no_agents=args.no_agents,
                 config=cfg
             )
             sys.exit(0)

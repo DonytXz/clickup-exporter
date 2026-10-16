@@ -27,10 +27,13 @@ flowchart TD
         DEST -->|Por Defecto| T_PATH
         DEST -->|--no-tracking| NT_PATH
         
-        RAW["raw-export/<br/>- Historia Principal.md<br/>- Subtareas BE - ...md<br/>- Subtareas FE - ...md<br/>- AGENTS.md<br/>- images/<br/>- TRANSFORM_TO_SDD.md"]
-        
+        RAW["raw-export/<br/>- Historia Principal.md<br/>- Subtareas BE - ...md<br/>- Subtareas FE - ...md<br/>- AGENTS.md<br/>- images/"]
+        DIRECTIVE["TRANSFORM_TO_SDD.md<br/>(En la raíz del ticket de specs)"]
+
         T_PATH --> RAW
+        T_PATH --> DIRECTIVE
         NT_PATH --> RAW
+        NT_PATH --> DIRECTIVE
     end
 
     subgraph Step2["Paso 2: Transformación por el Agente de IA"]
